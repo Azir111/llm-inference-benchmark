@@ -1,0 +1,237 @@
+# LLM 高并发推理服务 & 性能压测平台
+
+基于 **vLLM**，将 [电商客服微调模型](https://github.com/Azir111/customer-service-llm) 
+部署为高并发推理服务，并与 Transformers 原生推理做量化对比。
+
+## 项目定位
+
+| 项目 | 关注点 |
+|------|--------|
+| [customer-service-llm](https://github.com/Azir111/customer-service-llm) | 模型能力：LoRA 微调 + DPO 对齐 |
+| **本项目** | 工程能力：高并发服务化 + 性能评测 |
+
+> 同一个模型，从"能回答"到"高并发稳定回答"。
+
+---
+
+## 技术路线
+
+```
+微调模型 (SFT + DPO)
+    ↓
+vLLM 部署（OpenAI-compatible API）   Transformers 原生部署（对照组）
+    ↓                                      ↓
+        asyncio 并发压测（aiohttp）
+                    ↓
+        延迟 / 吞吐量 / 错误率 分析
+                    ↓
+             Markdown 对比报告 + 可视化图表
+```
+
+---
+
+## 项目结构
+
+```
+llm-inference-benchmark/
+├── deploy/
+│   ├── vllm_server.py       # vLLM 服务启动器（OpenAI-compatible API）
+│   └── baseline_server.py   # Transformers 原生服务（对照组）
+├── benchmark/
+│   ├── load_test.py         # asyncio 并发压测脚本
+│   └── analyze.py           # 结果分析 + 图表 + Markdown 报告
+├── results/                 # 压测结果输出目录
+│   ├── raw_results.json
+│   ├── latency_comparison.png
+│   ├── throughput_comparison.png
+│   └── benchmark_report.md
+├── demo_simulate.py         # 模拟数据演示（无需 GPU）
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 环境
+
+- GPU: NVIDIA RTX 4060Ti (8GB)
+- Python: 3.10+
+- CUDA: 12.1+
+
+---
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. 启动 vLLM 服务
+
+```bash
+# 部署微调后的模型（替换为你的模型路径）
+python deploy/vllm_server.py \
+    --model ./outputs/dpo_model \
+    --port 8000 \
+    --gpu-memory-utilization 0.85
+
+# 或直接用 vllm cli
+vllm serve ./outputs/dpo_model \
+    --port 8000 \
+    --served-model-name customer-service-llm \
+    --max-model-len 2048
+```
+
+### 3. 启动 Transformers 基线服务（对照组）
+
+```bash
+# 新开一个终端
+python deploy/baseline_server.py \
+    --model ./outputs/dpo_model \
+    --port 8001
+```
+
+### 4. 运行压测
+
+```bash
+# 并发数 1,2,4,8,16，每级 50 个请求
+python benchmark/load_test.py \
+    --vllm-url http://localhost:8000/v1/chat/completions \
+    --baseline-url http://localhost:8001/v1/chat/completions \
+    --concurrency 1 2 4 8 16 \
+    --requests 50
+```
+
+### 5. 分析结果
+
+```bash
+python benchmark/analyze.py
+# 输出：results/benchmark_report.md + 两张对比图
+```
+
+### 无 GPU 演示（模拟数据）
+
+```bash
+python demo_simulate.py          # 生成模拟压测数据
+python benchmark/analyze.py      # 生成报告和图表
+```
+
+---
+
+## 实验结果（RTX 4060Ti，真实压测数据）
+
+> 模型：Qwen2.5-1.5B-Instruct（SFT LoRA + DPO 微调后合并），每并发级别 50 请求，预热 3 次。
+
+### 吞吐量对比（QPS）
+
+| 并发 | vLLM QPS | Transformers QPS | vLLM 提升 |
+|------|---------|-----------------|---------|
+| 1    | 1.15    | 0.47            | +145%   |
+| 2    | 2.76    | 0.52            | +431%   |
+| 4    | 5.45    | 0.62            | +779%   |
+| 8    | 8.01    | 0.58            | +1281%  |
+| 16   | 11.95   | 0.68            | **+1657%** |
+
+### 延迟对比 (ms)
+
+| 并发 | vLLM P50 | vLLM P90 | TF P50  | TF P90  | P90 降低 |
+|------|---------|---------|--------|--------|---------|
+| 1    | 635     | 2626    | 1654   | 5535   | -52.6%  |
+| 2    | 636     | 1072    | 2918   | 7385   | -85.5%  |
+| 4    | 623     | 1030    | 4766   | 12334  | -91.7%  |
+| 8    | 691     | 1954    | 12464  | 20256  | -90.4%  |
+| 16   | 604     | 1818    | 25542  | 26457  | **-93.1%** |
+
+### 成功率对比
+
+| 并发 | vLLM 成功率 | Transformers 成功率 |
+|------|-----------|------------------|
+| 1    | 100%      | 100%             |
+| 4    | 100%      | 96%              |
+| 8    | 100%      | 86%              |
+| 16   | **100%**  | **76%**          |
+
+### 核心结论
+
+**1. 吞吐量（QPS）近线性扩展**：vLLM 从并发=1 到并发=16，QPS 从 1.15 提升到 11.95，接近 **10x 线性扩展**；Transformers 受串行推理限制，QPS 全程卡在 0.47~0.68，高并发完全没有扩展性。
+
+**2. 高并发下 Transformers 大量超时**：并发=16 时 Transformers 成功率跌至 76%，大量请求因排队超时失败；vLLM 全程保持 100% 成功率，Continuous Batching 有效消除了排队等待。
+
+**3. P90 延迟差距随并发扩大**：并发=16 时 vLLM P90 为 1818ms，Transformers P90 高达 26457ms，相差 **14.5 倍**，直接决定了用户实际体验的上限。
+
+**4. vLLM P50 延迟极度稳定**：vLLM 的 P50 在各并发级别下始终维持在 600~700ms 区间，说明 PagedAttention 的显存分页管理彻底消除了 KV cache 碎片带来的抖动。
+
+---
+
+## 关键技术点
+
+### 为什么 vLLM 在高并发下吞吐大幅领先？
+
+**Continuous Batching（连续批处理）**
+
+```
+Transformers（Static Batching）：
+请求1 ████████████████ 完成
+请求2 等待...等待...████████████████ 完成
+请求3                 等待...████████████████ 完成
+GPU 利用率低，大量时间在等待
+
+vLLM（Continuous Batching）：
+Step1: [req1, req2, req3, req4]  ← 每步 decode 动态加入新请求
+Step2: [req1, req2, req5, req6]  ← req3/req4 完成即释放位置
+GPU 利用率接近 100%
+```
+
+**PagedAttention**
+
+- 传统 KV cache：按最大长度预分配连续显存，碎片率 60-80%
+- PagedAttention：分页管理（类似 OS 虚拟内存），碎片率 <4%
+- 同等 8GB 显存，vLLM 可支持更多并发而不 OOM
+
+### 为什么选 OpenAI-compatible API？
+
+- 接口标准化：压测脚本、客户端代码无需改动即可切换后端
+- 生产就绪：直接对接现有业务系统（调用方只需改 base_url）
+- 监控友好：与 LangChain、LiteLLM 等生态无缝集成
+
+---
+
+## 压测方法论
+
+### 为什么用 asyncio + aiohttp？
+
+```python
+# 错误做法：用 threading 或同步请求，受 GIL 限制，并发数不准确
+# 正确做法：asyncio + Semaphore 精确控制并发数
+semaphore = asyncio.Semaphore(concurrency)
+async with semaphore:
+    await session.post(url, json=payload)
+```
+
+### 关键指标说明
+
+| 指标 | 说明 | 意义 |
+|------|------|------|
+| P50 延迟 | 中位数延迟 | 典型用户体验 |
+| P90 延迟 | 90% 请求在此之内 | 大多数用户体验 |
+| P99 延迟 | 99% 请求在此之内 | 长尾体验 |
+| QPS | Queries Per Second | 系统吞吐能力 |
+| Token/s | 总 token 生成速率 | GPU 计算利用率 |
+
+---
+
+## 问题
+
+**Q: vLLM 的 Continuous Batching 和普通 Batching 有什么区别？**
+
+A: 普通 Static Batching 需要凑齐一批请求才能推理，先到的必须等后到的，GPU 空闲等待；Continuous Batching 在每个 decode step 都能动态加入新请求、释放已完成的请求，GPU 始终满载，高并发下吞吐接近线性扩展。
+
+**Q: 为什么不直接用 4bit 量化的 vLLM？**
+
+A: RTX 4060Ti 8GB 显存，Qwen2.5-1.5B FP16 约需 3GB，vLLM 留出 KV cache 空间后可以跑。若换更大模型（7B FP16 约需 14GB），再考虑 AWQ/GPTQ 量化。量化会有精度损失，需要在延迟和精度之间权衡。
+
+**Q: 实际生产中 vLLM 还有哪些优化手段？**
+
+A: ① Tensor Parallelism 多卡并行；② Prefix Caching 复用相同 system prompt 的 KV cache；③ Speculative Decoding 草稿模型加速；④ 配合 NGINX 负载均衡做多实例水平扩展。

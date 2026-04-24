@@ -1,0 +1,5 @@
+results/raw_results.json
+results/*.png
+__pycache__/
+*.pyc
+.env

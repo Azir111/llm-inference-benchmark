@@ -1,0 +1,21 @@
+# 核心推理框架
+vllm>=0.4.0
+transformers>=4.40.0
+torch>=2.1.0
+
+# 服务端
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
+# 压测客户端
+aiohttp>=3.9.0
+
+# 量化（Transformers baseline）
+bitsandbytes>=0.43.0
+accelerate>=0.29.0
+
+# 分析可视化
+matplotlib>=3.8.0
+
+# 工具
+tqdm>=4.66.0
