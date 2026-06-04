@@ -1,6 +1,10 @@
 """
 vLLM 高并发推理服务
 基于 OpenAI-compatible API，支持 continuous batching
+
+新增（用于消融实验）：
+  --max-num-seqs  一个 batch 最多并发序列数；设为 1 可退化为无 continuous batching
+  --dtype         计算精度；做对照实验时务必两组显式写同一个值，锁死精度变量
 """
 
 import argparse
@@ -29,6 +33,8 @@ def start_server(
     max_model_len: int = 2048,
     quantization: str = None,
     tensor_parallel_size: int = 1,
+    max_num_seqs: int = 256,
+    dtype: str = "auto",
 ):
     """
     启动 vLLM OpenAI-compatible 服务
@@ -40,6 +46,10 @@ def start_server(
         max_model_len: 最大序列长度
         quantization: 量化方式 (awq / gptq / None)
         tensor_parallel_size: 张量并行数（多卡时使用）
+        max_num_seqs: 一个 batch 最多并发序列数（默认 256）；
+                      设为 1 退化为单流，等价于关闭 continuous batching（消融实验用）
+        dtype: 计算精度 (auto / float16 / bfloat16 / float32)；
+               做 A/B 对照时两组务必显式传同一个值，避免精度变量混入
     """
     cmd = [
         sys.executable, "-m", "vllm.entrypoints.openai.api_server",
@@ -50,7 +60,9 @@ def start_server(
         "--max-model-len", str(max_model_len),
         "--tensor-parallel-size", str(tensor_parallel_size),
         "--served-model-name", "customer-service-llm",
-        # 关键：启用 continuous batching（vLLM 默认开启）
+        # 关键：continuous batching 由 max_num_seqs 控制（>1 即开启，=1 退化为单流）
+        "--max-num-seqs", str(max_num_seqs),
+        "--dtype", dtype,
     ]
 
     if quantization:
@@ -65,6 +77,8 @@ def start_server(
     print(f"  最大序列长:   {max_model_len}")
     print(f"  量化:         {quantization or '无'}")
     print(f"  张量并行:     {tensor_parallel_size}")
+    print(f"  max_num_seqs: {max_num_seqs}{'  (单流 / 无 continuous batching)' if max_num_seqs == 1 else ''}")
+    print(f"  dtype:        {dtype}")
     print("="*60)
     print(f"\n启动命令:\n  {' '.join(cmd)}\n")
 
@@ -133,6 +147,11 @@ if __name__ == "__main__":
     parser.add_argument("--quantization", type=str, default=None,
                         choices=["awq", "gptq", None])
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--max-num-seqs", type=int, default=256,
+                        help="一个 batch 最多并发序列数；设为 1 可退化为无 continuous batching（消融实验用）")
+    parser.add_argument("--dtype", type=str, default="auto",
+                        choices=["auto", "float16", "bfloat16", "float32"],
+                        help="计算精度；做 A/B 对照时两组务必显式传同一个值，锁死精度变量")
     parser.add_argument("--test-only", action="store_true",
                         help="只发测试请求，不启动服务（服务已在运行时使用）")
     args = parser.parse_args()
@@ -151,6 +170,8 @@ if __name__ == "__main__":
             max_model_len=args.max_model_len,
             quantization=args.quantization,
             tensor_parallel_size=args.tensor_parallel_size,
+            max_num_seqs=args.max_num_seqs,
+            dtype=args.dtype,
         )
         if proc:
             test_server(args.port)

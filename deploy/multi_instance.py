@@ -55,7 +55,7 @@ def start_instances(model_path, n_instances=2, base_port=8000):
             stdout=subprocess.DEVNULL,  # 不打印vLLM日志，保持终端干净
             stderr=subprocess.DEVNULL,
         )
-        processes.append(proc)
+        processes.append(proc)  
         time.sleep(30)  # 错开启动时间，避免同时抢显存
 
     # 等待所有实例就绪
