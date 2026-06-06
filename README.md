@@ -44,7 +44,7 @@
 
 1. **扩展性来自 continuous batching（A vs B）**：开启 batching 的 A，QPS 随并发从 1.13 近线性扩展到 12.91（约 11×）；仅去掉 batching 这一个变量退化为单流的 B，QPS 全程卡在约 1.2，并发=16 时 A 是 B 的约 10 倍、TTFT_P90 从 52.4ms 飙到 14.1s。B 与朴素 Transformers（C）一样毫无扩展性——证明吞吐扩展的根本来源是调度机制，不是「换了个框架」。
 2. **单 token 速度由 kernel + 精度决定，与 batching 无关（A vs B 的 TPOT）**：A 与 B 的 TPOT 接近（15.0 vs 13.3ms），说明 batching 不影响吐字快慢；而 B（FP16）比 C（4bit）的 TPOT 快约 2.7×，这部分才是 kernel 优化 + 反量化开销的贡献。
-3. **端到端总差距（A vs C，TTFT 719× / QPS 27×）仅作总览**：它混合了 batching、kernel、量化三重因素，不可单独归因，故不再作为主打数字。
+3. **端到端总差距（A vs C，TTFT 719× / QPS 27×）仅作总览**：它混合了 batching、kernel、量化三重因素，不可单独归因。
 
 > 完整明细（各并发级别 TTFT / TPOT / ITL / 成功率 + 全部图表 + 归因分析）见 [消融压测报告](results/benchmark_report_ablation.md)。
 
