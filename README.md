@@ -410,7 +410,7 @@ A: ① Tensor Parallelism 多卡并行；② Prefix Caching 复用相同 system 
 
 ## 后续工作（Roadmap）
 
-- **真实 GPU 利用率测量**：压测时用 nvidia-smi / DCGM 采样利用率与显存，把"GPU 接近 100%"从断言变测量。
+- **真实 GPU 利用率测量**：压测时用 nvidia-smi / DCGM 采样利用率与显存。
 - **统计严谨性**：每并发级别加到 100+ 请求、多轮重复、报方差 / 置信区间（尤其负载均衡一节）。
 - **容器化 + 可观测性**：Dockerfile / docker-compose，vLLM `/metrics` 接 Prometheus + Grafana。
 - **多卡张量并行（TP）与真实多实例负载均衡**。
